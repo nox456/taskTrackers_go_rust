@@ -35,6 +35,7 @@ pub struct Task {
     pub name: String,
     pub description: String,
     pub state: State,
+    pub owner: i32,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -57,13 +58,14 @@ pub fn parse_state(s: &str) -> Result<State, String> {
 impl Task {
     /// Constructor de la estructura Task.
     /// Inicializa las marcas de tiempo en formato ISO 8601 (RFC3339) utilizando la crate `chrono`.
-    pub fn new(id: i32, name: String, description: String) -> Self {
+    pub fn new(id: i32, name: String, description: String, owner_id: i32) -> Self {
         let now = Utc::now().to_rfc3339();
         Task {
             id,
             name,
             description,
             state: State::Pending,
+            owner: owner_id,
             created_at: now.clone(),
             updated_at: now,
         }

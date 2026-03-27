@@ -2,13 +2,24 @@ use serde::{Serialize, Deserialize};
 use std::fs;
 use std::io;
 
+use crate::task::Task;
+use crate::user::User;
+
 /// Estructura que representa el esquema del archivo JSON.
 /// `next_id` mantiene la integridad de los identificadores únicos.
 #[derive(Serialize, Deserialize)]
 pub struct TaskStore {
     #[serde(rename = "next_id")]
     pub next_id: i32,
+    #[serde(default = "default_next_user_id")]
+    pub next_user_id: i32,
     pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub users: Vec<User>,
+}
+
+fn default_next_user_id() -> i32 {
+    1
 }
 
 /// Capa de abstracción para el acceso a datos.
@@ -27,7 +38,9 @@ impl Storage {
     pub fn load(&self) -> Result<TaskStore, Box<dyn std::error::Error>> {
         let store = TaskStore {
             next_id: 1,
+            next_user_id: 1,
             tasks: Vec::new(),
+            users: Vec::new(),
         };
 
         // Uso de pattern matching para diferenciar un archivo inexistente de un error de lectura.
@@ -65,5 +78,19 @@ impl Storage {
             Some(i) => Ok((&mut store.tasks[i], i)),
             None => Err(format!("task with ID {} not found", id).into()),
         }
+    }
+
+    /// Busca un usuario por su nombre de usuario dentro del almacén.
+    pub fn find_user_by_username<'a>(
+        &self,
+        store: &'a TaskStore,
+        username: &str,
+    ) -> Result<&'a User, Box<dyn std::error::Error>> {
+        for user in &store.users {
+            if user.username == username {
+                return Ok(user);
+            }
+        }
+        Err(format!("user {:?} not found", username).into())
     }
 }
