@@ -69,6 +69,7 @@ type Task struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	State       State  `json:"state"`
+	Owner       int    `json:"owner"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -125,7 +126,7 @@ func ParseState(s string) (State, error) {
 // For large structs, you'd return a pointer (*Task) to avoid copying.
 // ============================================================
 
-func NewTask(id int, name, description string) Task {
+func NewTask(id int, name, description string, ownerID int) Task {
 	// time.Now() returns the current time.
 	// .Format(time.RFC3339) converts it to a standard string format
 	// like "2026-03-21T14:30:00Z". RFC3339 is Go's equivalent of
@@ -140,6 +141,7 @@ func NewTask(id int, name, description string) Task {
 		Name:        name,
 		Description: description,
 		State:       Pending,
+		Owner:       ownerID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

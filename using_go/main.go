@@ -56,28 +56,49 @@ func main() {
 	// after each case. No need to write `break`.
 	// If you actually WANT fall-through, use the `fallthrough` keyword.
 	//
-	// TypeScript:                      Go:
-	//   switch(cmd) {                    switch cmd {
-	//     case "add":                    case "add":
-	//       handleAdd();                   handleAdd(...)
-	//       break;        <-- needed!
-	//     case "list":                   case "list":
-	//       handleList();                  handleList(...)
-	//       break;        <-- needed!
-	//   }                                }
+	// Commands are split into two groups:
+	//   1. Auth commands (register, login, logout) — no session needed
+	//   2. Task commands (add, list, update, delete, status) — require
+	//      an active session so we know which user is operating
 	// ============================================================
 	command := args[0]
+
+	switch command {
+	case "register":
+		handleRegister(storage, args[1:])
+		return
+	case "login":
+		handleLogin(storage, args[1:])
+		return
+	case "logout":
+		handleLogout()
+		return
+	}
+
+	// All task commands require an active session
+	store, err := storage.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading data: %v\n", err)
+		os.Exit(1)
+	}
+
+	user, err := LoadSession(store.Users)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	switch command {
 	case "add":
-		handleAdd(storage, args[1:])
+		handleAdd(storage, args[1:], user)
 	case "list":
-		handleList(storage, args[1:])
+		handleList(storage, args[1:], user)
 	case "update":
-		handleUpdate(storage, args[1:])
+		handleUpdate(storage, args[1:], user)
 	case "delete":
-		handleDelete(storage, args[1:])
+		handleDelete(storage, args[1:], user)
 	case "status":
-		handleStatus(storage, args[1:])
+		handleStatus(storage, args[1:], user)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		printUsage()
@@ -86,12 +107,14 @@ func main() {
 }
 
 func printUsage() {
-	// fmt.Println is like console.log() in TypeScript or
-	// System.out.println() in Java.
-	// fmt.Fprintf(os.Stderr, ...) writes to stderr instead of stdout.
 	fmt.Println("Task Tracker CLI")
 	fmt.Println()
-	fmt.Println("Usage:")
+	fmt.Println("Auth:")
+	fmt.Println("  task-tracker register <username> <password>")
+	fmt.Println("  task-tracker login <username> <password>")
+	fmt.Println("  task-tracker logout")
+	fmt.Println()
+	fmt.Println("Tasks (requires login):")
 	fmt.Println("  task-tracker add <name> <description>")
 	fmt.Println("  task-tracker list [state]")
 	fmt.Println("  task-tracker update <id> <name> <description>")
@@ -102,10 +125,87 @@ func printUsage() {
 }
 
 // ============================================================
-// COMMAND HANDLERS
+// AUTH HANDLERS
 // ============================================================
 
-func handleAdd(s *Storage, args []string) {
+func handleRegister(s *Storage, args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "Error: 'register' requires <username> and <password>")
+		fmt.Fprintln(os.Stderr, "Usage: task-tracker register <username> <password>")
+		os.Exit(1)
+	}
+
+	store, err := s.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading data: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if username is already taken
+	_, findErr := s.FindUserByUsername(&store, args[0])
+	if findErr == nil {
+		fmt.Fprintf(os.Stderr, "Error: username %q is already taken\n", args[0])
+		os.Exit(1)
+	}
+
+	user := NewUser(store.NextUserID, args[0], args[1])
+	store.Users = append(store.Users, user)
+	store.NextUserID++
+
+	if err := s.Save(store); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving data: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("User %q registered successfully (ID: %d)\n", user.Username, user.ID)
+}
+
+func handleLogin(s *Storage, args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "Error: 'login' requires <username> and <password>")
+		fmt.Fprintln(os.Stderr, "Usage: task-tracker login <username> <password>")
+		os.Exit(1)
+	}
+
+	store, err := s.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading data: %v\n", err)
+		os.Exit(1)
+	}
+
+	user, err := s.FindUserByUsername(&store, args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: invalid username or password")
+		os.Exit(1)
+	}
+
+	if user.Password != HashSHA256(args[1]) {
+		fmt.Fprintln(os.Stderr, "Error: invalid username or password")
+		os.Exit(1)
+	}
+
+	if err := SaveSession(user.ID); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating session: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Welcome back, %s!\n", user.Username)
+}
+
+func handleLogout() {
+	if err := ClearSession(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Logged out successfully.")
+}
+
+// ============================================================
+// TASK HANDLERS
+// ============================================================
+
+func handleAdd(s *Storage, args []string, user *User) {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "Error: 'add' requires <name> and <description>")
 		fmt.Fprintln(os.Stderr, "Usage: task-tracker add <name> <description>")
@@ -118,7 +218,7 @@ func handleAdd(s *Storage, args []string) {
 		os.Exit(1)
 	}
 
-	task := NewTask(store.NextID, args[0], args[1])
+	task := NewTask(store.NextID, args[0], args[1], user.ID)
 
 	// ============================================================
 	// APPEND (growing slices)
@@ -145,16 +245,11 @@ func handleAdd(s *Storage, args []string) {
 	fmt.Printf("Task added successfully (ID: %d)\n", task.ID)
 }
 
-func handleList(s *Storage, args []string) {
+func handleList(s *Storage, args []string, user *User) {
 	store, err := s.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading tasks: %v\n", err)
 		os.Exit(1)
-	}
-
-	if len(store.Tasks) == 0 {
-		fmt.Println("No tasks found.")
-		return
 	}
 
 	var filterState State
@@ -185,6 +280,9 @@ func handleList(s *Storage, args []string) {
 
 	found := false
 	for _, task := range store.Tasks {
+		if task.Owner != user.ID {
+			continue
+		}
 		if filterState != "" && task.State != filterState {
 			continue
 		}
@@ -199,11 +297,15 @@ func handleList(s *Storage, args []string) {
 	}
 
 	if !found {
-		fmt.Printf("No tasks with state %s.\n", filterState)
+		if filterState != "" {
+			fmt.Printf("No tasks with state %s.\n", filterState)
+		} else {
+			fmt.Println("No tasks found.")
+		}
 	}
 }
 
-func handleUpdate(s *Storage, args []string) {
+func handleUpdate(s *Storage, args []string, user *User) {
 	if len(args) < 3 {
 		fmt.Fprintln(os.Stderr, "Error: 'update' requires <id> <name> <description>")
 		fmt.Fprintln(os.Stderr, "Usage: task-tracker update <id> <name> <description>")
@@ -239,6 +341,11 @@ func handleUpdate(s *Storage, args []string) {
 		os.Exit(1)
 	}
 
+	if task.Owner != user.ID {
+		fmt.Fprintln(os.Stderr, "Error: you can only update your own tasks")
+		os.Exit(1)
+	}
+
 	// Because FindByID returns a *Task (pointer), modifying `task`
 	// here modifies the actual task inside store.Tasks.
 	// If it returned Task (value), this would modify a copy
@@ -255,7 +362,7 @@ func handleUpdate(s *Storage, args []string) {
 	fmt.Printf("Task %d updated successfully.\n", id)
 }
 
-func handleDelete(s *Storage, args []string) {
+func handleDelete(s *Storage, args []string, user *User) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Error: 'delete' requires <id>")
 		fmt.Fprintln(os.Stderr, "Usage: task-tracker delete <id>")
@@ -274,9 +381,14 @@ func handleDelete(s *Storage, args []string) {
 		os.Exit(1)
 	}
 
-	_, index, err := s.FindByID(&store, id)
+	task, index, err := s.FindByID(&store, id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if task.Owner != user.ID {
+		fmt.Fprintln(os.Stderr, "Error: you can only delete your own tasks")
 		os.Exit(1)
 	}
 
@@ -295,10 +407,6 @@ func handleDelete(s *Storage, args []string) {
 	// similar to the spread operator (...) in TypeScript:
 	//   TypeScript: [...before, ...after]
 	//   Go:         append(before, after...)
-	//
-	// Note: this does NOT preserve order of remaining elements
-	// if you care about performance. For our small task list,
-	// this approach is perfectly fine.
 	// ============================================================
 	store.Tasks = append(store.Tasks[:index], store.Tasks[index+1:]...)
 
@@ -310,7 +418,7 @@ func handleDelete(s *Storage, args []string) {
 	fmt.Printf("Task %d deleted successfully.\n", id)
 }
 
-func handleStatus(s *Storage, args []string) {
+func handleStatus(s *Storage, args []string, user *User) {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "Error: 'status' requires <id> <state>")
 		fmt.Fprintln(os.Stderr, "Usage: task-tracker status <id> <state>")
@@ -339,6 +447,11 @@ func handleStatus(s *Storage, args []string) {
 	task, _, err := s.FindByID(&store, id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if task.Owner != user.ID {
+		fmt.Fprintln(os.Stderr, "Error: you can only change the status of your own tasks")
 		os.Exit(1)
 	}
 

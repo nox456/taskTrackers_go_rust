@@ -8,10 +8,12 @@ import (
 )
 
 // TaskStore is the root structure of our JSON file.
-// It holds all tasks plus a counter for generating unique IDs.
+// It holds all tasks and users, plus counters for generating unique IDs.
 type TaskStore struct {
-	NextID int    `json:"next_id"`
-	Tasks  []Task `json:"tasks"`
+	NextID     int    `json:"next_id"`
+	NextUserID int    `json:"next_user_id"`
+	Tasks      []Task `json:"tasks"`
+	Users      []User `json:"users"`
 }
 
 // ============================================================
@@ -59,7 +61,7 @@ func NewStorage(filePath string) *Storage {
 // ============================================================
 
 func (s *Storage) Load() (TaskStore, error) {
-	store := TaskStore{NextID: 1}
+	store := TaskStore{NextID: 1, NextUserID: 1}
 
 	// os.ReadFile reads the entire file into memory as a byte slice.
 	// A byte slice ([]byte) is Go's way of handling raw binary data.
@@ -148,4 +150,13 @@ func (s *Storage) FindByID(store *TaskStore, id int) (*Task, int, error) {
 	}
 
 	return nil, -1, fmt.Errorf("task with ID %d not found", id)
+}
+
+func (s *Storage) FindUserByUsername(store *TaskStore, username string) (*User, error) {
+	for i, user := range store.Users {
+		if user.Username == username {
+			return &store.Users[i], nil
+		}
+	}
+	return nil, fmt.Errorf("user %q not found", username)
 }
